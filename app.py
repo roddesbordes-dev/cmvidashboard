@@ -48,17 +48,23 @@ def _file_mtime(path):
 
 
 @st.cache_data
-def load_panel(mtime=None):
-    path = RESULTS_DIR / 'cmvi_scores.csv'
+def load_panel(basis='weight', mtime=None):
+    """Load CMVI scores for the given basis (weight or value)."""
+    # Try basis-specific file first, then default
+    path = RESULTS_DIR / f'cmvi_scores_{basis}.csv'
+    if not path.exists():
+        path = RESULTS_DIR / 'cmvi_scores.csv'
     if path.exists():
         return pd.read_csv(path)
     return None
 
 
 @st.cache_data
-def load_all_consumer_panels(mtime=None):
-    """Load pre-computed consumer-specific CMVI panels."""
-    path = RESULTS_DIR / 'cmvi_all_consumers.csv'
+def load_all_consumer_panels(basis='weight', mtime=None):
+    """Load pre-computed consumer-specific CMVI panels for the given basis."""
+    path = RESULTS_DIR / f'cmvi_all_consumers_{basis}.csv'
+    if not path.exists():
+        path = RESULTS_DIR / 'cmvi_all_consumers.csv'
     if path.exists():
         return pd.read_csv(path)
     return None
@@ -146,20 +152,34 @@ st.set_page_config(
 
 st.title("Critical Minerals Vulnerability Index (CMVI)")
 
-# Load data (pass file mtime so cache invalidates when files change)
-panel_raw = load_panel(mtime=_file_mtime(RESULTS_DIR / 'cmvi_scores.csv'))
 config = load_config()
-consumer_panels = load_all_consumer_panels(mtime=_file_mtime(RESULTS_DIR / 'cmvi_all_consumers.csv'))
+
+# ============================================================================
+# SIDEBAR
+# ============================================================================
+
+st.sidebar.header("Controls")
+
+# Import share basis toggle (weight vs value) — placed first so data loads accordingly
+_basis_choice = st.sidebar.radio(
+    "Import share basis",
+    ["Weight (kg)", "Value (USD)"],
+    index=0,
+    help="Switches between weight-based and value-based CMVI scores (fully recomputed for each basis)."
+)
+_hhi_basis = 'weight' if _basis_choice == "Weight (kg)" else 'value'
+_share_col = 'import_share_wt' if _hhi_basis == 'weight' else 'import_share'
+_share_label = 'Import Share (weight)' if _hhi_basis == 'weight' else 'Import Share (value)'
+st.sidebar.caption(f"All CMVI/D2/D3 scores reflect **{_basis_choice.lower()}**-based import shares.")
+
+# Load data for the selected basis
+panel_raw = load_panel(basis=_hhi_basis, mtime=_file_mtime(RESULTS_DIR / f'cmvi_scores_{_hhi_basis}.csv'))
+consumer_panels = load_all_consumer_panels(basis=_hhi_basis, mtime=_file_mtime(RESULTS_DIR / f'cmvi_all_consumers_{_hhi_basis}.csv'))
 comtrade_shares = load_comtrade_shares(mtime=_file_mtime(DATA_DIR / 'comtrade_import_shares_by_stage.csv'), mtime_fallback=_file_mtime(DATA_DIR / 'comtrade_import_shares.csv'))
 comtrade_indicators = load_comtrade_indicators(mtime=_file_mtime(DATA_DIR / 'comtrade_consumer_indicators.csv'))
 
-# Default trade-share basis from config (will be overridden by sidebar toggle)
-_hhi_basis = config.get('hhi_basis', 'weight')
-_share_col = 'import_share_wt' if _hhi_basis == 'weight' else 'import_share'
-_share_label = 'Import Share (weight)' if _hhi_basis == 'weight' else 'Import Share (value)'
-
 if panel_raw is None:
-    st.error("No CMVI results found. Run `python cmvi_framework.py` first.")
+    st.error("No CMVI results found. Run `python pipeline/cmvi_framework.py` first.")
     st.stop()
 
 # Check if consumer-specific data is available
@@ -167,12 +187,6 @@ has_consumer_data = consumer_panels is not None and len(consumer_panels) > 0
 available_consumers = []
 if has_consumer_data:
     available_consumers = sorted(consumer_panels['consumer'].unique())
-
-# ============================================================================
-# SIDEBAR
-# ============================================================================
-
-st.sidebar.header("Controls")
 
 # Consumer selector
 if has_consumer_data:
@@ -187,32 +201,8 @@ if has_consumer_data:
     panel_raw = consumer_panels[consumer_panels['consumer'] == selected_consumer].copy()
 else:
     selected_consumer = 'Global'
-    st.sidebar.caption("Consumer-specific data not available. Run `python build_comtrade.py` + "
-                       "`python cmvi_framework.py --all-consumers` to enable.")
-
-# Import share basis toggle (weight vs value)
-_basis_choice = st.sidebar.radio(
-    "Import share basis",
-    ["Weight (kg)", "Value (USD)"],
-    index=0 if _hhi_basis == 'weight' else 1,
-    help="Weight-based reflects physical supply dependence; value-based reflects economic exposure."
-)
-_hhi_basis = 'weight' if _basis_choice == "Weight (kg)" else 'value'
-_share_col = 'import_share_wt' if _hhi_basis == 'weight' else 'import_share'
-_share_label = 'Import Share (weight)' if _hhi_basis == 'weight' else 'Import Share (value)'
-_pipeline_basis = config.get('hhi_basis', 'weight')
-_pipeline_label = "weight (kg)" if _pipeline_basis == 'weight' else "value (USD)"
-st.sidebar.caption(
-    f"CMVI scores computed with **{_pipeline_label}** shares (config.yaml). "
-    f"Display basis: **{_basis_choice}**."
-)
-if _hhi_basis != _pipeline_basis:
-    st.sidebar.warning(
-        "Display basis differs from pipeline basis. "
-        "Import share charts show the selected basis, but D2/D3/CMVI scores "
-        "were computed using the pipeline basis. Re-run `cmvi_framework.py --all-consumers` "
-        "after changing `hhi_basis` in config.yaml to fully recompute scores."
-    )
+    st.sidebar.caption("Consumer-specific data not available. Run `python pipeline/build_comtrade.py` + "
+                       "`python pipeline/cmvi_framework.py --all-consumers` to enable.")
 
 # Year selector
 years = sorted(panel_raw['year'].unique())
@@ -723,10 +713,10 @@ with tab_d3:
                         f"Available stages: {', '.join(avail_stages)}.")
             else:
                 st.info(f"No trade data for {mineral_geo} in {selected_year}. "
-                        f"Run `python build_comtrade.py` to build Comtrade data.")
+                        f"Run `python pipeline/build_comtrade.py` to build Comtrade data.")
     else:
         if comtrade_stage is None:
-            st.info("Comtrade trade data not available. Run `python build_comtrade.py` first.")
+            st.info("Comtrade trade data not available. Run `python pipeline/build_comtrade.py` first.")
         if wgi is None:
             st.info("WGI governance data not available.")
 
@@ -855,7 +845,7 @@ with tab_d2:
                 st.warning(
                     f"No trade-stage HHI data for: {', '.join(missing_minerals)}. "
                     "These minerals show as zero but actually have missing data. "
-                    "Run `build_comtrade.py --patch-download` then reprocess to fix."
+                    "Run `pipeline/build_comtrade.py --patch-download` then reprocess to fix."
                 )
 
             # Sort by hhi_bottleneck if available, else by max across 4 channels
@@ -933,12 +923,12 @@ with tab_d2:
             if len(cons_panel) == 0:
                 st.info(
                     f"No data for consumer '{selected_consumer}' in year {selected_year}. "
-                    "Try a different year or check that `cmvi_framework.py --all-consumers` has been run."
+                    "Try a different year or check that `pipeline/cmvi_framework.py --all-consumers` has been run."
                 )
             else:
                 st.info(
                     "No 4-way bottleneck HHI columns found. "
-                    "Run `build_comtrade.py --patch-download` then `cmvi_framework.py --all-consumers` to generate trade HHI data."
+                    "Run `pipeline/build_comtrade.py --patch-download` then `pipeline/cmvi_framework.py --all-consumers` to generate trade HHI data."
                 )
     else:
         # Fallback: show D2 scores from global panel
