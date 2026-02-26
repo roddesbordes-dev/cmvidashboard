@@ -14,6 +14,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
 import yaml
+import os
+import datetime
 
 # ============================================================================
 # CONFIG & DATA LOADING
@@ -46,7 +48,7 @@ def _file_mtime(path):
 
 
 @st.cache_data
-def load_panel(_mtime=None):
+def load_panel(mtime=None):
     path = RESULTS_DIR / 'cmvi_scores.csv'
     if path.exists():
         return pd.read_csv(path)
@@ -54,7 +56,7 @@ def load_panel(_mtime=None):
 
 
 @st.cache_data
-def load_all_consumer_panels(_mtime=None):
+def load_all_consumer_panels(mtime=None):
     """Load pre-computed consumer-specific CMVI panels."""
     path = RESULTS_DIR / 'cmvi_all_consumers.csv'
     if path.exists():
@@ -63,7 +65,7 @@ def load_all_consumer_panels(_mtime=None):
 
 
 @st.cache_data
-def load_csv(name, _mtime=None):
+def load_csv(name, mtime=None):
     path = DATA_DIR / name
     if path.exists():
         return pd.read_csv(path)
@@ -71,7 +73,7 @@ def load_csv(name, _mtime=None):
 
 
 @st.cache_data
-def load_comtrade_shares(_mtime=None, _mtime_fallback=None):
+def load_comtrade_shares(mtime=None, mtime_fallback=None):
     """Load Comtrade bilateral import shares (by stage: raw/intermediate)."""
     path = DATA_DIR / 'comtrade_import_shares_by_stage.csv'
     if path.exists():
@@ -84,7 +86,7 @@ def load_comtrade_shares(_mtime=None, _mtime_fallback=None):
 
 
 @st.cache_data
-def load_comtrade_indicators(_mtime=None):
+def load_comtrade_indicators(mtime=None):
     """Load pre-computed consumer indicators (HHI, HHI-WGI)."""
     path = DATA_DIR / 'comtrade_consumer_indicators.csv'
     if path.exists():
@@ -93,7 +95,7 @@ def load_comtrade_indicators(_mtime=None):
 
 
 @st.cache_data
-def load_sensitivity(_mtime=None):
+def load_sensitivity(mtime=None):
     mc = RESULTS_DIR / 'sensitivity_mc_weights.csv'
     dr = RESULTS_DIR / 'sensitivity_dropout.csv'
     ag = RESULTS_DIR / 'sensitivity_aggregation.csv'
@@ -145,13 +147,13 @@ st.set_page_config(
 st.title("Critical Minerals Vulnerability Index (CMVI)")
 
 # Load data (pass file mtime so cache invalidates when files change)
-panel_raw = load_panel(_mtime=_file_mtime(RESULTS_DIR / 'cmvi_scores.csv'))
+panel_raw = load_panel(mtime=_file_mtime(RESULTS_DIR / 'cmvi_scores.csv'))
 config = load_config()
-consumer_panels = load_all_consumer_panels(_mtime=_file_mtime(RESULTS_DIR / 'cmvi_all_consumers.csv'))
-comtrade_shares = load_comtrade_shares(_mtime=_file_mtime(DATA_DIR / 'comtrade_import_shares_by_stage.csv'), _mtime_fallback=_file_mtime(DATA_DIR / 'comtrade_import_shares.csv'))
-comtrade_indicators = load_comtrade_indicators(_mtime=_file_mtime(DATA_DIR / 'comtrade_consumer_indicators.csv'))
+consumer_panels = load_all_consumer_panels(mtime=_file_mtime(RESULTS_DIR / 'cmvi_all_consumers.csv'))
+comtrade_shares = load_comtrade_shares(mtime=_file_mtime(DATA_DIR / 'comtrade_import_shares_by_stage.csv'), mtime_fallback=_file_mtime(DATA_DIR / 'comtrade_import_shares.csv'))
+comtrade_indicators = load_comtrade_indicators(mtime=_file_mtime(DATA_DIR / 'comtrade_consumer_indicators.csv'))
 
-# Determine which trade-share column to display (respects config hhi_basis)
+# Default trade-share basis from config (will be overridden by sidebar toggle)
 _hhi_basis = config.get('hhi_basis', 'weight')
 _share_col = 'import_share_wt' if _hhi_basis == 'weight' else 'import_share'
 _share_label = 'Import Share (weight)' if _hhi_basis == 'weight' else 'Import Share (value)'
@@ -172,10 +174,6 @@ if has_consumer_data:
 
 st.sidebar.header("Controls")
 
-if st.sidebar.button("Reload data from disk"):
-    st.cache_data.clear()
-    st.rerun()
-
 # Consumer selector
 if has_consumer_data:
     consumer_options = available_consumers
@@ -187,12 +185,34 @@ if has_consumer_data:
     )
     # Get the panel for the selected consumer
     panel_raw = consumer_panels[consumer_panels['consumer'] == selected_consumer].copy()
-    basis_label = "weight (kg)" if _hhi_basis == 'weight' else "value (USD)"
-    st.sidebar.caption(f"Showing {selected_consumer} CMVI (D2/D3 use {basis_label}-based import shares)")
 else:
     selected_consumer = 'Global'
     st.sidebar.caption("Consumer-specific data not available. Run `python build_comtrade.py` + "
                        "`python cmvi_framework.py --all-consumers` to enable.")
+
+# Import share basis toggle (weight vs value)
+_basis_choice = st.sidebar.radio(
+    "Import share basis",
+    ["Weight (kg)", "Value (USD)"],
+    index=0 if _hhi_basis == 'weight' else 1,
+    help="Weight-based reflects physical supply dependence; value-based reflects economic exposure."
+)
+_hhi_basis = 'weight' if _basis_choice == "Weight (kg)" else 'value'
+_share_col = 'import_share_wt' if _hhi_basis == 'weight' else 'import_share'
+_share_label = 'Import Share (weight)' if _hhi_basis == 'weight' else 'Import Share (value)'
+_pipeline_basis = config.get('hhi_basis', 'weight')
+_pipeline_label = "weight (kg)" if _pipeline_basis == 'weight' else "value (USD)"
+st.sidebar.caption(
+    f"CMVI scores computed with **{_pipeline_label}** shares (config.yaml). "
+    f"Display basis: **{_basis_choice}**."
+)
+if _hhi_basis != _pipeline_basis:
+    st.sidebar.warning(
+        "Display basis differs from pipeline basis. "
+        "Import share charts show the selected basis, but D2/D3/CMVI scores "
+        "were computed using the pipeline basis. Re-run `cmvi_framework.py --all-consumers` "
+        "after changing `hhi_basis` in config.yaml to fully recompute scores."
+    )
 
 # Year selector
 years = sorted(panel_raw['year'].unique())
@@ -233,7 +253,7 @@ if len(selected_minerals) == 0:
 # ============================================================================
 
 if has_consumer_data:
-    tab_ov, tab_d1, tab_d2, tab_d3, tab_d4, tab_sec, tab_evo, tab_sens, tab_comp = st.tabs([
+    tab_ov, tab_d1, tab_d2, tab_d3, tab_d4, tab_sec, tab_evo, tab_sens, tab_comp, tab_guide = st.tabs([
         "Overview",
         "D1: Physical Availability",
         "D2: Trade Concentration",
@@ -242,10 +262,11 @@ if has_consumer_data:
         "Sector Vulnerability",
         "Time Evolution",
         "Sensitivity",
-        "Consumer Comparison"
+        "Consumer Comparison",
+        "\u2139\ufe0f User Guide"
     ])
 else:
-    tab_ov, tab_d1, tab_d2, tab_d3, tab_d4, tab_sec, tab_evo, tab_sens = st.tabs([
+    tab_ov, tab_d1, tab_d2, tab_d3, tab_d4, tab_sec, tab_evo, tab_sens, tab_guide = st.tabs([
         "Overview",
         "D1: Physical Availability",
         "D2: Trade Concentration",
@@ -253,7 +274,8 @@ else:
         "D4: Substitution",
         "Sector Vulnerability",
         "Time Evolution",
-        "Sensitivity"
+        "Sensitivity",
+        "\u2139\ufe0f User Guide"
     ])
     tab_comp = None
 
@@ -582,8 +604,8 @@ with tab_d3:
         "**RISK** = bilateral monthly conflict index (12-month MA), 216x219 country pairs, 2015-2026."
     )
 
-    wgi = load_csv('country_wgi.csv', _mtime=_file_mtime(DATA_DIR / 'country_wgi.csv'))
-    comtrade_stage = load_comtrade_shares(_mtime=_file_mtime(DATA_DIR / 'comtrade_import_shares_by_stage.csv'), _mtime_fallback=_file_mtime(DATA_DIR / 'comtrade_import_shares.csv'))
+    wgi = load_csv('country_wgi.csv', mtime=_file_mtime(DATA_DIR / 'country_wgi.csv'))
+    comtrade_stage = load_comtrade_shares(mtime=_file_mtime(DATA_DIR / 'comtrade_import_shares_by_stage.csv'), mtime_fallback=_file_mtime(DATA_DIR / 'comtrade_import_shares.csv'))
 
     if comtrade_stage is not None and wgi is not None:
         mineral_geo = st.selectbox("Select mineral", all_minerals, index=0, key='geo_mineral')
@@ -794,7 +816,7 @@ with tab_d2:
     )
     st.caption(
         "Sources: **Import/export HHI** computed from UN Comtrade bilateral trade flows (annual, 2015-2023) "
-        "for 156 HS6 codes classified into raw/intermediate stages using UN BEC Rev.5. "
+        "for 162 HS6 codes classified into raw/intermediate stages using UN BEC Rev.5. "
         "**Import reliance** from USGS data (consumer-specific)."
     )
 
@@ -1017,7 +1039,7 @@ with tab_sec:
         "by sector). Sector definitions: Solar PV, Wind, EV Batteries, Grid Storage, Electricity Networks, Hydrogen."
     )
 
-    enduse = load_csv('minerals_enduse.csv', _mtime=_file_mtime(DATA_DIR / 'minerals_enduse.csv'))
+    enduse = load_csv('minerals_enduse.csv', mtime=_file_mtime(DATA_DIR / 'minerals_enduse.csv'))
     if enduse is not None and len(enduse) > 0:
         # Compute sector CMVI
         yr_cmvi = panel[panel['year'] == selected_year][['mineral', 'CMVI']].copy()
@@ -1104,7 +1126,7 @@ with tab_sens:
         "Sidebar weight adjustments apply to the currently selected consumer."
     )
 
-    sens = load_sensitivity(_mtime=_file_mtime(RESULTS_DIR / 'sensitivity_mc_weights.csv'))
+    sens = load_sensitivity(mtime=_file_mtime(RESULTS_DIR / 'sensitivity_mc_weights.csv'))
 
     if 'mc' in sens:
         st.subheader("Monte Carlo Weight Perturbation")
@@ -1174,7 +1196,7 @@ if tab_comp is not None and has_consumer_data:
             "is more or less exposed than the global average."
         )
         st.caption(
-            "Sources: **Bilateral trade** = UN Comtrade API (annual, 2015-2023, 156 HS6 codes). "
+            "Sources: **Bilateral trade** = UN Comtrade API (annual, 2015-2023, 162 HS6 codes). "
             "**Stage classification** = BEC Rev.5 (raw/intermediate). "
             "**HS-mineral mapping** = UNCTAD SDG Pulse 2025 (499 HS6 codes across 60 minerals). "
             "**Import reliance** = 1 - domestic/world output (USGS). "
@@ -1362,14 +1384,183 @@ if tab_comp is not None and has_consumer_data:
 
 
 # ============================================================================
+# TAB: User Guide
+# ============================================================================
+
+with tab_guide:
+    st.header("User Guide")
+
+    st.subheader("What Is the CMVI?")
+    st.markdown("""
+The **Critical Minerals Vulnerability Index (CMVI)** is a composite index measuring how
+vulnerable a consumer economy is to disruptions in the supply of 20 critical minerals.
+It combines four dimensions:
+
+- **D1: Physical Availability** — Can the world produce enough of this mineral in the long run?
+- **D2: Supply Chain Fragility** — Is trade concentrated among a few partners, and is the consumer import-dependent?
+- **D3: Geopolitical Risk** — Are key suppliers politically unstable, restrictive, or hostile?
+- **D4: Substitution Vulnerability** — Can the mineral be replaced in its main industrial applications?
+
+Each dimension is scored 0–1 (higher = more vulnerable). The four dimensions are aggregated using
+a **weighted geometric mean**, which penalises minerals that are vulnerable across *all* dimensions
+simultaneously (non-compensatory aggregation).
+
+**Consumers:** EU-27, United States, Japan, South Korea, China, plus a GDP-weighted Global average.
+**Time coverage:** 2015–2023. **Minerals:** 20 critical minerals.
+""")
+
+    st.subheader("Important Caveats")
+    st.warning("""
+**Relative scores, not absolute levels.** All sub-indicators are min-max normalised *within each year*
+across the 20 minerals. The most vulnerable mineral always scores 1 and the least scores 0 for every indicator.
+A mineral's score can *fall* even if its absolute concentration rises, provided other minerals worsen faster.
+Cross-year comparisons reflect **rank changes**, not absolute improvements or deteriorations.
+""")
+    st.info("""
+**Weight-based vs. value-based import shares.** Use the sidebar toggle to switch between weight (kg) and
+value (USD) for import share displays. Weight-based shares better reflect physical supply dependence and avoid
+price distortions. The pipeline computes CMVI scores using the basis set in `config.yaml` (`hhi_basis`).
+Changing the sidebar toggle only affects displayed import shares; to fully recompute scores, update
+`config.yaml` and re-run the pipeline.
+""")
+
+    st.subheader("Tab Guide")
+
+    with st.expander("**Overview** — Rankings, Criticality Matrix, Heatmap", expanded=False):
+        st.markdown("""
+- **CMVI Rankings** table for the selected year, with colour-coded scores.
+- **Criticality Matrix** (bubble chart): supply risk (avg D1–D3) on x-axis vs substitution vulnerability (D4) on y-axis. Top-right = most critical.
+- **CMVI Heatmap**: all minerals × all years.
+- **Dimension Contributions** (stacked bar): how much each dimension contributes.
+- **Radar Chart**: select a mineral to compare its D1–D4 profile against the average.
+""")
+
+    with st.expander("**D1: Physical Availability** — Reserves, By-products, Recycling", expanded=False):
+        st.markdown("""
+**Sub-indicators:**
+- **Reserves-to-Production Ratio (RP):** Years of reserves remaining. Higher RP → lower vulnerability (inverted).
+- **By-product Dependency (BP):** Fraction produced as a by-product of another metal.
+- **End-of-Life Recycling Rate (EOL-RIR):** Fraction recoverable from waste. Higher → lower vulnerability (inverted).
+
+**Sources:** USGS MCS 2025 (reserves, production); EU CRM 2023 (by-product fractions, recycling rates).
+
+D1 is largely *static* — reserves and recycling data change slowly.
+""")
+
+    with st.expander("**D2: Trade Concentration** — Four-Way Bottleneck HHI + Import Reliance", expanded=False):
+        st.markdown("""
+**Sub-indicators:**
+- **Four-way Bottleneck HHI:** Maximum HHI across 4 trade channels (import raw, import intermediate, export raw, export intermediate). Import channels are consumer-specific; export channels are global. Captures the *weakest link*.
+- **Import Reliance (IR):** Share of consumption that must be imported.
+
+**Sources:** UN Comtrade bilateral trade (162 HS codes, BEC Rev.5); USGS production data.
+
+D2 is the most *dynamic* dimension — trade flows shift year-to-year.
+""")
+
+    with st.expander("**D3: Geopolitical Risk** — Governance, Export Restrictions, RISK Index", expanded=False):
+        st.markdown("""
+**Sub-indicators:**
+- **Governance-Weighted HHI (HHI-WGI):** Import concentration weighted by supplier governance quality.
+- **Export Restrictions:** OECD inventory (2024).
+- **Bilateral RISK Index:** Monthly geopolitical tension (216 × 219 pairs). Import-share-weighted.
+
+**Sources:** World Bank WGI 2025; OECD IRMA 2024; RISK bilateral index.
+
+**EU-specific:** RISK is import-weighted across all 27 member states, capturing heterogeneous exposures.
+""")
+
+    with st.expander("**D4: Substitution Vulnerability** — Substitution Difficulty, Performance Penalty", expanded=False):
+        st.markdown("""
+**Sub-indicators:**
+- **Substitution Index (SI):** EU CRM 2023 difficulty of replacing this mineral.
+- **Performance Penalty:** Quality loss when substituting.
+- **End-Use HHI:** Concentration of the mineral across industrial sectors.
+
+**Sources:** EU CRM 2023; USGS MCS 2025 end-use shares (11 of 20 minerals).
+
+D4 is largely *static* — substitution technology evolves on decadal timescales.
+""")
+
+    with st.expander("**Sector Vulnerability** — Industrial Sector Exposure", expanded=False):
+        st.markdown("""
+Sector-level vulnerability weighted by mineral consumption shares and CMVI scores.
+Available for 11 of 20 minerals with USGS end-use data.
+""")
+
+    with st.expander("**Time Evolution** — Trends and Rank Dynamics", expanded=False):
+        st.markdown("""
+- **CMVI Over Time:** Top N minerals' scores across 2015–2023.
+- **Dimension Evolution:** D1–D4 breakdown for a single mineral over time.
+
+**Caution:** Rising lines mean the mineral worsened *relative to peers*, not in absolute terms.
+""")
+
+    with st.expander("**Sensitivity** — Weight Robustness and Aggregation Comparison", expanded=False):
+        st.markdown("""
+- **Monte Carlo:** 1,000 random Dirichlet weight draws. Narrow box = stable ranking.
+- **Aggregation Comparison:** Spearman correlations between geometric, arithmetic, Euclidean methods.
+- **Dimension Dropout:** Rankings when each dimension is removed.
+""")
+
+    with st.expander("**Consumer Comparison** — Cross-Consumer Analysis", expanded=False):
+        st.markdown("""
+- **Ranking Comparison:** Heatmap of CMVI by mineral and consumer.
+- **Rank Divergence:** Which minerals differ most across consumers.
+- **Dimension Profile:** Compare D1–D4 for a mineral across consumers.
+- **Import Sources:** Top partners by import share.
+
+D1/D4 are shared across consumers (global geology/technology). D2/D3 are consumer-specific (bilateral trade).
+""")
+
+    st.subheader("Glossary")
+    glossary_data = {
+        'Term': ['CMVI', 'HHI', 'Bottleneck HHI', 'WGI', 'HHI-WGI', 'RISK Index',
+                 'Import Reliance', 'EOL-RIR', 'BEC Rev.5', 'Geometric Mean',
+                 'Min-Max Normalisation', 'GDP-Weighted Global'],
+        'Definition': [
+            'Critical Minerals Vulnerability Index. Composite score (0–1) via weighted geometric mean.',
+            'Herfindahl-Hirschman Index. Sum of squared market shares. 0 = perfect competition, 1 = monopoly.',
+            'Max HHI across 4 trade channels (import raw/int, export raw/int). Most concentrated point in supply chain.',
+            'World Governance Indicators (World Bank). Political Stability, Rule of Law, Regulatory Quality.',
+            'Import HHI weighted by supplier governance risk. Imports from poorly-governed countries = higher risk.',
+            'Bilateral geopolitical tension index (monthly, 216 × 219 pairs). Higher = more tension.',
+            '1 − (domestic production / world production). Fraction that must be imported.',
+            'End-of-Life Recycling Input Rate. Share of consumption met by recycling.',
+            'UN Broad Economic Categories Rev.5. Classifies HS codes into raw, intermediate, finished.',
+            'exp(Σ wᵢ ln Dᵢ). Non-compensatory: cannot offset high vulnerability in one dimension with low in another.',
+            '(x − min) / (max − min). Rescales to [0,1] within each year across 20 minerals.',
+            'Average of 5 consumer CMVIs: US 38.7%, China 26.9%, EU 25.5%, Japan 6.4%, Korea 2.6%.'
+        ]
+    }
+    st.dataframe(pd.DataFrame(glossary_data), use_container_width=True, hide_index=True)
+
+    st.subheader("Data Sources")
+    sources_data = {
+        'Dataset': ['Mining & reserves', 'Processing shares', 'Bilateral trade', 'Governance',
+                     'Export restrictions', 'Geopolitical tensions', 'Substitution & recycling',
+                     'End-use shares', 'GDP weights'],
+        'Source': ['USGS MCS 2025', 'IEA (2024)', 'UN Comtrade', 'World Bank WGI 2025',
+                   'OECD IRMA 2024', 'RISK bilateral index', 'EU CRM 2023', 'USGS MCS 2025',
+                   'World Bank'],
+        'Dimensions': ['D1, D2, D3', 'D2, D3', 'D2, D3', 'D3', 'D3', 'D3', 'D1, D4', 'D4', 'Aggregation'],
+        'Coverage': ['20 minerals, 93 countries', '6 minerals', '162 HS codes, 5 consumers',
+                     '216 countries', '80 countries, 57 minerals', '216 × 219 pairs, monthly',
+                     '87 materials', '11 of 20 minerals', '5 consumers, 2023']
+    }
+    st.dataframe(pd.DataFrame(sources_data), use_container_width=True, hide_index=True)
+
+# ============================================================================
 # FOOTER
 # ============================================================================
 
 st.divider()
 consumer_label = f" | Consumer: {selected_consumer}" if selected_consumer != 'Global' else ""
+_scores_path = RESULTS_DIR / 'cmvi_scores.csv'
+_last_computed = datetime.datetime.fromtimestamp(os.path.getmtime(_scores_path)).strftime('%Y-%m-%d %H:%M') if _scores_path.exists() else "unknown"
 st.caption(
     f"CMVI Dashboard{consumer_label} | "
     f"Supply chain: 4-way trade-based bottleneck (import raw/intermediate + export raw/intermediate HHI) | "
     f"Data: USGS (D1), EU CRM 2023, OECD, World Bank WGI, UN Comtrade, RISK | "
-    f"Last computed: {RESULTS_DIR / 'cmvi_scores.csv'}"
+    f"Last computed: {_last_computed}"
 )
