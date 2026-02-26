@@ -243,7 +243,8 @@ if len(selected_minerals) == 0:
 # ============================================================================
 
 if has_consumer_data:
-    tab_ov, tab_d1, tab_d2, tab_d3, tab_d4, tab_sec, tab_evo, tab_sens, tab_comp, tab_guide = st.tabs([
+    tab_guide, tab_ov, tab_d1, tab_d2, tab_d3, tab_d4, tab_sec, tab_evo, tab_sens, tab_comp = st.tabs([
+        "\u2139\ufe0f User Guide",
         "Overview",
         "D1: Physical Availability",
         "D2: Trade Concentration",
@@ -252,11 +253,11 @@ if has_consumer_data:
         "Sector Vulnerability",
         "Time Evolution",
         "Sensitivity",
-        "Consumer Comparison",
-        "\u2139\ufe0f User Guide"
+        "Consumer Comparison"
     ])
 else:
-    tab_ov, tab_d1, tab_d2, tab_d3, tab_d4, tab_sec, tab_evo, tab_sens, tab_guide = st.tabs([
+    tab_guide, tab_ov, tab_d1, tab_d2, tab_d3, tab_d4, tab_sec, tab_evo, tab_sens = st.tabs([
+        "\u2139\ufe0f User Guide",
         "Overview",
         "D1: Physical Availability",
         "D2: Trade Concentration",
@@ -264,8 +265,7 @@ else:
         "D4: Substitution",
         "Sector Vulnerability",
         "Time Evolution",
-        "Sensitivity",
-        "\u2139\ufe0f User Guide"
+        "Sensitivity"
     ])
     tab_comp = None
 
