@@ -1,0 +1,91 @@
+# =============================================================================
+# CMVI Configuration — config.yaml
+# =============================================================================
+# Adjust weights, mineral list, and parameters here.
+# All within-dimension weights must sum to 1.0.
+
+version: "1.0"
+
+minerals:
+  - Lithium
+  - Cobalt
+  - Nickel
+  - Copper
+  - Manganese
+  - Graphite
+  - Rare Earths
+  - Platinum
+  - Palladium
+  - Vanadium
+  - Tungsten
+  - Molybdenum
+  - Niobium
+  - Germanium
+  - Gallium
+  - Silicon
+  - Antimony
+  - Aluminium
+  - Beryllium
+  - Zirconium
+
+years: [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+
+# --- Within-dimension weights (must sum to 1.0) ---
+
+weights_d1_physical:
+  reserves_to_production: 0.35
+  byproduct_dependency: 0.30
+  recycling_rate: 0.25
+  ore_grade_trend: 0.10       # set to 0 if data unavailable
+
+weights_d2_supplychain:
+  hhi_bottleneck: 0.75        # max(HHI_mine, HHI_proc, HHI_comp)
+  import_reliance: 0.25
+
+weights_d3_geopolitical:
+  hhi_wgi: 0.35               # governance-weighted concentration
+  export_restrictions: 0.25    # OECD + CritMin.org
+  resource_nationalism: 0.20   # Fraser Institute or constructed
+  sanctions_exposure: 0.20
+
+weights_d4_substitution:
+  n_substitutes: 0.30
+  performance_penalty: 0.30
+  enduse_diversification: 0.20
+  cross_price_elasticity: 0.20  # set to 0 if unavailable
+
+# --- Across-dimension weights (must sum to 1.0) ---
+
+weights_dimensions:
+  D1_physical: 0.25
+  D2_supplychain: 0.25
+  D3_geopolitical: 0.25
+  D4_substitution: 0.25
+
+# --- Trade share basis for HHI ---
+# Options: "weight" (net weight in kg — physical quantity),
+#          "value" (trade value in USD)
+# Weight-based better captures physical supply vulnerability;
+# value-based reflects economic exposure. Default: weight.
+hhi_basis: "weight"
+
+# --- Aggregation method ---
+# Options: "geometric" (recommended), "multiplicative", "euclidean", "arithmetic"
+aggregation: "geometric"
+
+# --- WGI Configuration ---
+# Which WGI components to average for governance quality
+wgi_components:
+  - wgi_ps    # Political Stability
+  - wgi_rl    # Rule of Law
+  - wgi_rq    # Regulatory Quality
+
+# WGI rescaling parameters (raw [-2.5, 2.5] → [0, 10])
+wgi_rescale_min: -2.5
+wgi_rescale_max: 2.5
+wgi_target_max: 10.0
+
+# --- Sensitivity analysis ---
+sensitivity:
+  n_simulations: 1000
+  dirichlet_alpha: 1.0   # uniform over weight simplex
