@@ -1408,10 +1408,9 @@ Cross-year comparisons reflect **rank changes**, not absolute improvements or de
 """)
     st.info("""
 **Weight-based vs. value-based import shares.** Use the sidebar toggle to switch between weight (kg) and
-value (USD) for import share displays. Weight-based shares better reflect physical supply dependence and avoid
-price distortions. The pipeline computes CMVI scores using the basis set in `config.yaml` (`hhi_basis`).
-Changing the sidebar toggle only affects displayed import shares; to fully recompute scores, update
-`config.yaml` and re-run the pipeline.
+value (USD) based CMVI scores. Both versions are fully pre-computed — the toggle loads entirely different
+score files, so all CMVI, D2, and D3 values change accordingly. Weight-based shares better reflect physical
+supply dependence and avoid price distortions; value-based shares capture economic exposure.
 """)
 
     st.subheader("Tab Guide")
